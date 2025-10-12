@@ -1,0 +1,82 @@
+# Default configuration for Sliding‑Window FP‑Tree experiments
+#
+# This file defines sensible default values for the parameters used by the
+# FP‑tree variants, baseline algorithms and evaluation routines.  These
+# defaults reflect the values used in the accompanying research paper and
+# can be overridden in ``config/experiment_params.yaml`` when running
+# experiments.  Each section corresponds to a component of the system.
+
+fp_tree:
+  # Minimum relative support threshold for frequent pattern mining.  A pattern
+  # must appear in at least this fraction of the transactions within the
+  # sliding window to be considered frequent.
+  min_support: 0.005
+  # Candidate window sizes (number of flows) to evaluate.  Experiments will
+  # iterate over these values to assess the trade‑off between detection
+  # accuracy and resource consumption.  Use 5k increments to capture
+  # different operating regimes.
+  window_sizes: [5000, 10000, 20000, 50000]
+  # Number of transactions processed in a mini‑batch before updating the
+  # model.  Smaller batch sizes yield lower latency but may increase overhead.
+  batch_size: 1000
+
+variants:
+  no_reorder:
+    # Length of the tilted counter history for each item used by the NR
+    # variant to track decayed support over time.  This value has minimal
+    # effect on performance but larger values retain longer histories.
+    tilted_counter_length: 10
+  partial_rebuild:
+    # Fractional change in item rank required to trigger a partial rebuild of
+    # the FP‑tree.  If an item’s rank changes by more than this fraction
+    # compared to its previous rank, the corresponding subtree is rebuilt.
+    rebuild_threshold: 0.1
+  two_tree:
+    # Number of transactions inserted into each half window before the two
+    # sub‑trees are swapped.  The effective window size will be twice this
+    # value.  Smaller values improve recency but increase overhead.
+    merge_interval: 5000
+  decay_hybrid:
+    # Exponential decay factor applied to counts in the DH variant.  A lower
+    # value results in faster decay and emphasises more recent patterns.
+    decay_factor: 0.995
+
+baselines:
+  half_space_trees:
+    # Number of trees in the HS‑Trees ensemble.  More trees improve stability
+    # but increase memory and computation.
+    n_trees: 25
+    # Depth of each tree in the HS‑Trees ensemble.  Deeper trees produce
+    # finer partitions but may overfit noise.
+    tree_depth: 15
+  random_cut_forest:
+    # Number of trees in the Random Cut Forest ensemble.  More trees
+    # increase robustness at the cost of memory and speed.
+    n_trees: 100
+    # Size of the sample used to build each tree.  A larger sample size
+    # increases accuracy but also the memory footprint.
+    sample_size: 256
+  online_autoencoder:
+    # Fraction of the input dimension used for the encoding layer of the
+    # autoencoder baseline.  A value of 0.5 halves the dimensionality.
+    encoding_dim: 0.5
+    # Learning rate used by the incremental optimiser when fitting the
+    # autoencoder.  Smaller values lead to slower but more stable learning.
+    learning_rate: 0.001
+
+evaluation:
+  # Metrics to compute during experiments.  The classification metrics rely
+  # on binary labels (0/1) for benign/attack flows, while throughput and
+  # memory usage capture system performance.  Additional metrics may be
+  # appended by end users.
+  metrics: [f1_score, precision, recall, pr_auc, throughput, latency, memory]
+  # Statistical tests to apply when comparing algorithms.  Bootstrap
+  # resampling is used to compute confidence intervals, Cochran’s Q test
+  # assesses differences across more than two algorithms, and McNemar tests
+  # evaluate pairwise differences.  Holm correction controls the familywise
+  # error rate.
+  statistical_tests: [bootstrap, cochran_q, mcnemar]
+  # Confidence level for bootstrap intervals (e.g. 0.95 yields 95 % CIs).
+  confidence_level: 0.95
+  # Number of resamples to draw when computing bootstrap statistics.
+  n_resamples: 10000

@@ -1,0 +1,35 @@
+# Apache Flink cluster configuration
+#
+# The experiments may be executed on a local Flink mini‑cluster or a
+# standalone cluster.  This configuration file provides example
+# settings for both.  Modify as necessary for your environment.
+
+jobmanager:
+  # Address of the JobManager.  For a local mini‑cluster this is
+  # localhost.  For a distributed cluster provide the hostname or IP
+  # of the JobManager node.
+  address: "localhost"
+  # RPC port used by the JobManager.  Default Flink port is 6123.
+  port: 6123
+
+taskmanager:
+  # Number of TaskManager slots.  Each slot allows one parallel
+  # operator chain.  Increase this number to improve parallelism.
+  slots: 4
+  # Memory allocation for the TaskManager.  Adjust to match
+  # available hardware.  Values may include units (e.g., 1024m).
+  memory: "2048m"
+  # JVM options for the TaskManager (optional).  Use this section
+  # to tune garbage collection or debugging flags.
+  # jvm_options: "-XX:+UseG1GC -Xloggc:gc.log"
+
+pipeline:
+  # Default parallelism for operators when not explicitly overridden.
+  parallelism: 1
+  # Restart strategy used by Flink when the job fails.  Use
+  # 'none' to disable automatic restarts or set to 'fixed‑delay' or
+  # 'failure‑rate' with appropriate parameters.
+  restart_strategy:
+    type: fixed-delay
+    delay: 10000  # milliseconds between restarts
+    attempts: 3

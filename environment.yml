@@ -1,0 +1,21 @@
+name: fp-tree-ids-research
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - java=11
+  - apache-flink=1.14.4
+  - numpy=1.21.0
+  - pandas=1.3.0
+  - scikit-learn=1.0.0
+  - matplotlib=3.4.0
+  - seaborn=0.11.0
+  - pyyaml=5.4.0
+  - psutil=5.8.0
+  - scipy=1.6.0
+  - pytest=6.2.0
+  - requests=2.25.1
+  - pip
+  - pip:
+      - requests==2.25.1

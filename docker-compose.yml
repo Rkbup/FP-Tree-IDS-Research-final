@@ -1,0 +1,10 @@
+services:
+  fp-tree-experiments:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+    environment:
+      - JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+      - PYTHONPATH=/app
+    command: python experiments/main_experiment.py --config config/experiment_params.yaml
