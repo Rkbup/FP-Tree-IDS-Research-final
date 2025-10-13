@@ -1,0 +1,7 @@
+{
+    "terminal.integrated.commandsToSkipShell": [
+        "-workbench.action.terminal.sendSequence"
+    ],
+    "terminal.integrated.sendKeybindingsToShell": false,
+    "terminal.integrated.allowChords": true
+}

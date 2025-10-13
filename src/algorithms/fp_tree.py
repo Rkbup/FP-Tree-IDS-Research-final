@@ -212,10 +212,11 @@ class FPTree:
     def mine_frequent_patterns(self) -> Dict[Tuple[str, ...], int]:
         """Mine all frequent itemsets in the current FP‑tree.
 
-        This is a simplified FP‑growth implementation that traverses the
-        header table to build conditional FP‑trees recursively.  It returns
-        frequent itemsets with absolute support counts.  Only itemsets with
-        support >= ``min_support * window_size`` are returned.
+        This is an iterative FP‑growth implementation that uses a stack to
+        avoid deep recursion. It traverses the header table to build
+        conditional FP‑trees and returns frequent itemsets with absolute
+        support counts. Only itemsets with support >= ``min_support *
+        window_size`` are returned.
 
         Returns
         -------
@@ -223,20 +224,22 @@ class FPTree:
             A dictionary mapping itemset tuples to support counts.
         """
         patterns: Dict[Tuple[str, ...], int] = {}
-        # Use a floor of 1 for minimum count to avoid eliminating items with fractional
-        # counts due to decay in DH variant.
         min_count = max(1, int(self.min_support * max(1, len(self._window))))
-        # Sort items by support ascending for mining
+
+        # Stack for iterative mining: stores (suffix, conditional_base)
+        tasks = []
+
+        # Initial tasks: for each frequent item in the main tree
         items = [(item, self._item_support(item)) for item in self.header_table]
         items = [item for item, cnt in items if cnt >= min_count]
         for item in sorted(items, key=lambda x: self._item_support(x)):
             suffix = (item,)
             support = self._item_support(item)
-            if support >= min_count:
-                patterns[suffix] = support
-            # Build conditional pattern base
+            patterns[suffix] = support
+
+            # Build conditional pattern base for the first level
             conditional_base = []
-            node = self.header_table[item]
+            node = self.header_table.get(item)
             while node is not None:
                 path: List[str] = []
                 parent = node.parent
@@ -246,15 +249,44 @@ class FPTree:
                 if path:
                     conditional_base.append((path[::-1], node.count))
                 node = node.link
-            # Build conditional FP‑tree
+            
+            if conditional_base:
+                tasks.append((suffix, conditional_base))
+
+        while tasks:
+            current_suffix, conditional_base = tasks.pop()
+
+            # Build conditional FP-tree
             cond_tree = FPTree(min_support=self.min_support, window_size=len(conditional_base) or 1)
             for path, count in conditional_base:
-                # Insert path `count` times
                 for _ in range(int(count)):
                     cond_tree.insert_transaction(path)
-            # Recurse
-            for pattern, cnt in cond_tree.mine_frequent_patterns().items():
-                patterns[tuple(sorted(pattern + suffix))] = cnt
+            
+            # Mine the conditional tree
+            cond_items = [(item, cond_tree._item_support(item)) for item in cond_tree.header_table]
+            cond_items = [item for item, cnt in cond_items if cnt >= cond_tree.min_support * len(cond_tree._window)]
+
+            for item in sorted(cond_items, key=lambda x: cond_tree._item_support(x)):
+                new_pattern = current_suffix + (item,)
+                support = cond_tree._item_support(item)
+                patterns[tuple(sorted(new_pattern))] = support
+
+                # Build the next level conditional base
+                new_conditional_base = []
+                node = cond_tree.header_table.get(item)
+                while node is not None:
+                    path = []
+                    parent = node.parent
+                    while parent is not None and parent.item is not None:
+                        path.append(parent.item)
+                        parent = parent.parent
+                    if path:
+                        new_conditional_base.append((path[::-1], node.count))
+                    node = node.link
+                
+                if new_conditional_base:
+                    tasks.append((new_pattern, new_conditional_base))
+
         return patterns
 
     def _item_support(self, item: str) -> int:

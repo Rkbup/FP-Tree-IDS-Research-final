@@ -2,8 +2,7 @@ services:
   fp-tree-experiments:
     build: .
     volumes:
-      - ./data:/app/data
-      - ./results:/app/results
+      - .:/app
     environment:
       - JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
       - PYTHONPATH=/app

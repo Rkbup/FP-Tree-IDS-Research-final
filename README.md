@@ -1,6 +1,6 @@
 # FP-Tree-IDS-Research-final
 
-This repository provides the complete reproduction package for the paper *Sliding-Window FP-Tree Reconstruction for Real-Time Network Intrusion Detection*. It contains everything required to recreate the reported experiments: preprocessing pipelines, FP-tree variants, baseline models, streaming utilities, evaluation scripts, statistical analysis, and plotting routines.
+This repository provides the complete reproduction package for the paper “Sliding-Window FP-Tree Reconstruction for Real-Time Network Intrusion Detection”. It contains everything required to recreate the reported experiments: preprocessing pipelines, FP-tree variants, baseline models, streaming utilities, evaluation scripts, statistical analysis, and plotting routines.
 
 The project is organised as a conventional Python package with clear boundaries between raw data, processed artefacts, source code, configuration, experiments, and generated results. Docker support is available for fully containerised runs, while Conda allows local execution.
 
@@ -48,39 +48,38 @@ python experiments/main_experiment.py
 
 ```
 FP-Tree-IDS-Research/
-├── README.md
-├── requirements.txt
-├── environment.yml
-├── docker-compose.yml
-├── .github/workflows/ci-cd.yml
-├── data/
-│   ├── raw/                 # Original CIC-IDS2017 CSV files (placeholder)
-│   ├── processed/           # Cached processed artefacts
-│   ├── bin_edges.json       # Quantile bin boundaries for discretisation
-│   └── download_dataset.py  # Dataset download/verification script
-├── src/
-│   ├── preprocessing/       # Loading, feature engineering, transaction building
-│   ├── algorithms/          # FP-tree variants and baseline anomaly detectors
-│   ├── streaming/           # Sliding-window management utilities
-│   └── evaluation/          # Metrics, visualisation, statistical routines
-├── experiments/             # Reproduction scripts for each reported experiment
-│   ├── main_experiment.py
-│   ├── concept_drift_analysis.py
-│   ├── baseline_comparison.py
-│   ├── sensitivity_analysis.py
-│   ├── interpretability_demo.py
-│   └── smoke_test.py
-├── config/                  # YAML configuration files for experiments
-│   ├── default.yaml
-│   ├── experiment_params.yaml
-│   └── flink_config.yaml
-├── results/                 # Generated outputs (figures, tables, logs, stats)
-│   ├── figures/
-│   ├── tables/
-│   ├── statistical_analysis/
-│   └── logs/
-├── tests/                   # Unit tests for core functionality
-└── docs/                    # Extended documentation (installation, API, etc.)
+  README.md
+  requirements.txt
+  environment.yml
+  docker-compose.yml
+  data/
+    raw/                 # Original CIC-IDS2017 CSV files (placeholder)
+    processed/           # Cached processed artefacts
+    bin_edges.json       # Quantile bin boundaries for discretisation
+    download_dataset.py  # Dataset download/verification script
+  src/
+    preprocessing/       # Loading, feature engineering, transaction building
+    algorithms/          # FP-tree variants and baseline anomaly detectors
+    streaming/           # Sliding-window management utilities
+    evaluation/          # Metrics, visualisation, statistical routines
+  experiments/           # Reproduction scripts for each reported experiment
+    main_experiment.py
+    concept_drift_analysis.py
+    baseline_comparison.py
+    sensitivity_analysis.py
+    interpretability_demo.py
+    smoke_test.py
+  config/                # YAML configuration files for experiments
+    default.yaml
+    experiment_params.yaml
+    flink_config.yaml
+  results/               # Generated outputs (figures, tables, logs, stats)
+    figures/
+    tables/
+    statistical_analysis/
+    logs/
+  tests/                 # Unit tests for core functionality
+  docs/                  # Extended documentation (installation, API, etc.)
 ```
 
 ## Reproducing the Results
@@ -109,4 +108,5 @@ FP-Tree-IDS-Research/
 
 ## License
 
-Released under the MIT License. See the [LICENSE](LICENSE) file for details.
+Released under the MIT License. See the LICENSE file for details.
+

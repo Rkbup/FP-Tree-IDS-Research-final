@@ -26,7 +26,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -77,6 +77,7 @@ def evaluate_streaming_performance(
     labels: np.ndarray,
     window_size: int,
     anomaly_threshold: float = 0.5,
+    pattern_refresh_interval: int = 1
 ) -> Dict[str, Dict[str, float]]:
     """Process a stream of transactions with multiple algorithms.
 
@@ -122,17 +123,20 @@ def evaluate_streaming_performance(
         y_pred = np.zeros(n, dtype=np.int8)
         scores = np.zeros(n, dtype=np.float32)
         mem_usages: List[float] = []
+        refresh_interval = max(1, pattern_refresh_interval)
         if isinstance(alg, (FPTree, PartialRebuildFPTree, DecayHybridFPTree)):
             # FP‑tree variant using sliding window manager
             window_manager = SlidingWindowManager(alg, max_size=window_size)
+            cached_patterns: Dict[Tuple[str, ...], int] = {}
             for idx, txn in enumerate(transactions):
                 window_manager.update(txn)
+                if idx == 0 or ((idx + 1) % refresh_interval) == 0:
+                    cached_patterns = alg.mine_frequent_patterns()
                 # Compute rarity score: simplistic measure 1 − max support
-                patterns = alg.mine_frequent_patterns()
                 score = 1.0
                 # Compute rarity as described in Eq. (1): 1 - max support / window
-                if patterns:
-                    max_support = max(patterns.values())
+                if cached_patterns:
+                    max_support = max(cached_patterns.values())
                     score = 1.0 - (max_support / max(1, len(window_manager.window)))
                 scores[idx] = score
                 y_pred[idx] = 1 if score >= anomaly_threshold else 0
@@ -141,13 +145,15 @@ def evaluate_streaming_performance(
                     mem_usages.append(memory_usage_mb())
         elif isinstance(alg, TwoTreeFPTree):
             # Two‑tree variant: effective window size is 2 * half_window_size
+            cached_patterns: Dict[Tuple[str, ...], int] = {}
             for idx, txn in enumerate(transactions):
                 alg.insert_transaction(txn)
+                if idx == 0 or ((idx + 1) % refresh_interval) == 0:
+                    cached_patterns = alg.mine_frequent_patterns()
                 # Compute rarity across both trees
-                patterns = alg.mine_frequent_patterns()
                 score = 1.0
-                if patterns:
-                    max_support = max(patterns.values())
+                if cached_patterns:
+                    max_support = max(cached_patterns.values())
                     score = 1.0 - (max_support / (2 * alg.half_window_size))
                 scores[idx] = score
                 y_pred[idx] = 1 if score >= anomaly_threshold else 0
