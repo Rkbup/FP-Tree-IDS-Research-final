@@ -1,0 +1,82 @@
+{
+  "timestamp": "2025-10-14T11:30:00",
+  "backup_reason": "Power outage protection",
+  "kubernetes_experiment": {
+    "status": "running",
+    "namespace": "fp-tree",
+    "pod_name": "fp-tree-main-experiment-dq6r9",
+    "dataset": "CIC-IDS2017",
+    "rows_loaded": 2830743,
+    "files_loaded": 8,
+    "current_phase": "feature_engineering_starting",
+    "progress_percentage": 15,
+    "resume_command": "kubectl logs fp-tree-main-experiment-dq6r9 -n fp-tree --tail=50 -f"
+  },
+  "synthetic_experiment": {
+    "status": "running",
+    "algorithm": "NR",
+    "transactions_processed": 2000,
+    "total_transactions": 5000,
+    "progress_percentage": 40,
+    "checkpoint_file": "results/checkpoints/synthetic_NR_checkpoint.json",
+    "remaining_algorithms": ["PR", "TT", "DH", "HST", "RCF", "OAE"],
+    "resume_command": "C:/Users/Abdullah Rakib Akand/Downloads/FP-Tree-IDS-Research-final/.venv/Scripts/python.exe experiments/synthetic_full_experiment.py"
+  },
+  "infrastructure": {
+    "docker_image": {
+      "name": "fp-tree-ids:latest",
+      "size_mb": 331,
+      "rebuild_command": "docker build -t fp-tree-ids:latest ."
+    },
+    "persistent_volumes": [
+      {
+        "name": "fp-tree-data",
+        "size": "50Gi",
+        "status": "Bound",
+        "data_populated": true,
+        "csv_files": 8
+      },
+      {
+        "name": "fp-tree-results",
+        "size": "10Gi",
+        "status": "Bound"
+      }
+    ],
+    "python_environment": {
+      "path": ".venv",
+      "python_version": "3.13.8",
+      "key_packages": {
+        "rich": "13.9.4",
+        "keyboard": "0.13.5",
+        "numpy": "2.3.3",
+        "pandas": "2.3.3",
+        "scikit-learn": "1.7.2"
+      }
+    }
+  },
+  "key_files_saved": [
+    "k8s/job.yaml",
+    "k8s/pvc.yaml",
+    "k8s/configmap.yaml",
+    "k8s/namespace.yaml",
+    "experiments/synthetic_full_experiment.py",
+    "experiments/main_experiment_with_checkpointing.py",
+    "monitor_experiments.py",
+    "powershell-config.ps1",
+    "results/checkpoints/synthetic_NR_checkpoint.json",
+    "RECOVERY_STATUS.md",
+    "RESTART_COMMANDS.bat"
+  ],
+  "git_status": {
+    "branch": "main",
+    "remote": "origin",
+    "last_commit": "9f7ec33",
+    "commit_message": "Save progress: K8s experiment data loaded (2.8M rows), synthetic NR at 40%, all configs and checkpoints preserved",
+    "uncommitted_files": 0
+  },
+  "estimated_completion": {
+    "k8s_hours_remaining": 4.5,
+    "synthetic_hours_remaining": 2.5,
+    "total_hours": 6
+  }
+}
