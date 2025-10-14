@@ -23,54 +23,94 @@ python experiments/parameter_tuning.py
 import time
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 from src.preprocessing.data_loader import load_cic_ids2017
 from src.preprocessing.feature_engineering import FeatureEngineer
-from src.preprocessing.transaction_builder import TransactionBuilder
-from src.algorithms.variants.no_reorder import NoReorderFPTree
-from src.algorithms.variants.partial_rebuild import PartialRebuildFPTree
+# ... existing code ...
 from src.algorithms.variants.two_tree import TwoTreeFPTree
 from src.algorithms.variants.decay_hybrid import DecayHybridFPTree
+from src.evaluation.metrics import classification_metrics
 
 # --- Configuration ---
-DATA_SAMPLE_SIZE = 100_000  # Number of records to use for tuning
-MIN_SUPPORT_THRESHOLDS = [0.01, 0.02, 0.05, 0.1, 0.15, 0.2]
-WINDOW_SIZE = 10_000 # A reasonable window size for the sample
+SYNTHETIC_DATA_PATH = "data/raw/synthetic_cic_ids2017.csv"
+MIN_SUPPORT_THRESHOLDS = np.linspace(0.001, 0.1, 20).tolist() # Test a wider range of values
+WINDOW_SIZE = 5000  # Smaller window for faster tuning on synthetic data
+N_JOBS = -1  # Use all available CPU cores
+
+def run_single_experiment(AlgoClass, name, min_support, transactions, labels):
+    """Runs a single experiment for a given algorithm and min_support."""
+    try:
+        if name == "TT":
+            algorithm = AlgoClass(min_support=min_support, half_window_size=WINDOW_SIZE // 2)
+        else:
+            algorithm = AlgoClass(min_support=min_support, window_size=WINDOW_SIZE)
+
+        y_pred = np.zeros(len(transactions))
+        scores = np.zeros(len(transactions))
+
+        for i, transaction in enumerate(transactions):
+            algorithm.insert_transaction(transaction)
+            patterns = algorithm.mine_frequent_patterns()
+            
+            score = 1.0
+            if patterns:
+                max_support = max(patterns.values(), default=0)
+                score = 1.0 - (max_support / max(1, i + 1))
+            
+            scores[i] = score
+            y_pred[i] = 1 if score >= 0.5 else 0
+
+        metrics = classification_metrics(labels, y_pred)
+        f1 = metrics.get('f1', 0)
+        
+        print(f"  {name} @ {min_support:.4f} -> F1-Score: {f1:.4f}")
+        
+        return {
+            "algorithm": name,
+            "min_support": min_support,
+            "f1_score": f1,
+        }
+    except Exception as e:
+        print(f"  {name} @ {min_support:.4f} -> FAILED with error: {e}")
+        return {
+            "algorithm": name,
+            "min_support": min_support,
+            "f1_score": -1,
+        }
 
 def tune_parameters():
     """
-    Runs the parameter tuning experiment.
+    Runs the parameter tuning experiment in parallel.
     """
-    print("--- Phase 2: Dynamic Parameter Tuning ---")
-    print(f"Using a sample of {DATA_SAMPLE_SIZE} records.")
-    print(f"Testing min_support values: {MIN_SUPPORT_THRESHOLDS}")
+    print("--- Efficient Parameter Tuning on Synthetic Data ---")
+    print(f"Testing {len(MIN_SUPPORT_THRESHOLDS)} min_support values from {MIN_SUPPORT_THRESHOLDS[0]:.4f} to {MIN_SUPPORT_THRESHOLDS[-1]:.4f}")
+    print(f"Using {N_JOBS if N_JOBS != -1 else 'all'} CPU cores.")
     print("-" * 40)
 
-    # 1. Load and preprocess a sample of the data
-    print("Loading and preprocessing data sample...")
+    # 1. Load and preprocess the synthetic data
+    print("Loading and preprocessing synthetic data...")
     try:
-        df = load_cic_ids2017(raw_dir="data/raw", days=["Monday"], verbose=False)
-        df_sample = df.head(DATA_SAMPLE_SIZE)
+        df = pd.read_csv(SYNTHETIC_DATA_PATH)
         
         feature_engineer = FeatureEngineer()
-        df_selected = feature_engineer.select_features(df_sample)
+        df_selected = feature_engineer.select_features(df)
         df_featured = feature_engineer.discretize_continuous_features(df_selected)
 
-        # Convert string labels to binary (0/1)
         if 'Label' in df_featured.columns:
             df_featured['Label'] = (df_featured['Label'].str.upper() != 'BENIGN').astype(int)
 
-        # Correctly build transactions
         builder = TransactionBuilder()
         transactions = builder.build_transactions(df_featured.drop(columns=['Label'], errors='ignore'))
         labels = df_featured['Label'].values if 'Label' in df_featured else np.zeros(len(df_featured))
-        print(f"Data sample loaded and processed into {len(transactions)} transactions.")
+        print(f"Synthetic data loaded and processed into {len(transactions)} transactions.")
     except Exception as e:
         print(f"Error loading or preprocessing data: {e}")
         return
 
     # 2. Define algorithms to tune
-    # We instantiate them inside the loop to reset their state
     algorithm_classes = {
         "NR": NoReorderFPTree,
         "PR": PartialRebuildFPTree,
@@ -78,76 +118,53 @@ def tune_parameters():
         "DH": DecayHybridFPTree,
     }
 
-    results = []
+    all_results = []
 
-    # 3. Iterate over algorithms and min_support values
+    # 3. Run experiments in parallel for each algorithm
     for name, AlgoClass in algorithm_classes.items():
         print(f"\n--- Tuning Algorithm: {name} ---")
-        for min_support in MIN_SUPPORT_THRESHOLDS:
-            try:
-                # Instantiate algorithm with the current min_support
-                if name == "TT":
-                     # TwoTree uses half_window_size
-                    algorithm = AlgoClass(min_support=min_support, half_window_size=WINDOW_SIZE // 2)
-                else:
-                    algorithm = AlgoClass(min_support=min_support, window_size=WINDOW_SIZE)
+        
+        results = Parallel(n_jobs=N_JOBS)(
+            delayed(run_single_experiment)(AlgoClass, name, ms, transactions, labels)
+            for ms in MIN_SUPPORT_THRESHOLDS
+        )
+        all_results.extend(results)
 
-                start_time = time.time()
-                
-                # Process transactions
-                for i, transaction in enumerate(transactions):
-                    algorithm.insert_transaction(transaction)
-                    # Mine patterns periodically to simulate real-world usage
-                    if (i + 1) % 1000 == 0:
-                        patterns = algorithm.mine_frequent_patterns()
-
-                # Final mining at the end
-                patterns = algorithm.mine_frequent_patterns()
-                num_patterns = len(patterns)
-                
-                end_time = time.time()
-                execution_time = end_time - start_time
-
-                print(f"  min_support: {min_support:<5} | Time: {execution_time:8.3f}s | Patterns: {num_patterns}")
-                
-                results.append({
-                    "algorithm": name,
-                    "min_support": min_support,
-                    "execution_time": execution_time,
-                    "num_patterns": num_patterns,
-                })
-
-            except Exception as e:
-                print(f"  min_support: {min_support:<5} | FAILED with error: {e}")
-                results.append({
-                    "algorithm": name,
-                    "min_support": min_support,
-                    "execution_time": -1,
-                    "num_patterns": -1,
-                })
-
-    # 4. Analyze and print summary
+    # 4. Analyze, plot, and print summary
     print("\n--- Tuning Summary ---")
-    results_df = pd.DataFrame(results)
-    print(results_df.to_string())
+    results_df = pd.DataFrame([r for r in all_results if r is not None])
+    
+    # Create figure directory if it doesn't exist
+    fig_dir = Path("results/figures")
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(12, 7))
 
     print("\n--- Recommendations ---")
     for name in algorithm_classes.keys():
         algo_results = results_df[results_df['algorithm'] == name]
-        valid_results = algo_results[algo_results['execution_time'] > 0]
+        valid_results = algo_results[algo_results['f1_score'] > 0]
         
         if not valid_results.empty:
-            # Find a balance: not too slow, but generates a good number of patterns
-            # Heuristic: prefer lower time, but avoid zero patterns
-            reasonable_time = valid_results[valid_results['num_patterns'] > 10]
-            if not reasonable_time.empty:
-                best_choice = reasonable_time.loc[reasonable_time['execution_time'].idxmin()]
-            else: # If all generate few patterns, pick the fastest
-                best_choice = valid_results.loc[valid_results['execution_time'].idxmin()]
+            best_choice = valid_results.loc[valid_results['f1_score'].idxmax()]
+            print(f"For {name}: Recommended min_support = {best_choice['min_support']:.4f} (F1-Score: {best_choice['f1_score']:.4f})")
             
-            print(f"For {name}: Recommended min_support = {best_choice['min_support']} (Time: {best_choice['execution_time']:.2f}s, Patterns: {best_choice['num_patterns']})")
+            # Plotting
+            ax.plot(algo_results['min_support'], algo_results['f1_score'], marker='o', linestyle='-', label=name)
         else:
-            print(f"For {name}: No successful runs. Manual inspection needed.")
+            print(f"For {name}: No successful runs with F1 > 0. Manual inspection needed.")
+
+    ax.set_title('Parameter Tuning: F1-Score vs. Min Support on Synthetic Data')
+    ax.set_xlabel('Minimum Support Threshold')
+    ax.set_ylabel('F1-Score')
+    ax.legend()
+    ax.set_ylim(0, 1)
+    ax.grid(True)
+    
+    plot_path = fig_dir / "parameter_tuning_f1_vs_support.png"
+    plt.savefig(plot_path)
+    print(f"\nPlot saved to: {plot_path}")
 
 if __name__ == "__main__":
     tune_parameters()

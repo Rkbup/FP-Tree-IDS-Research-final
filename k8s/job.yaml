@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fp-tree-main-experiment
+  namespace: fp-tree
+  labels:
+    app.kubernetes.io/name: fp-tree-main-experiment
+    app.kubernetes.io/part-of: fp-tree-ids
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fp-tree-main-experiment
+        app.kubernetes.io/part-of: fp-tree-ids
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: main
+          image: fp-tree-ids:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -lc
+            - python experiments/main_experiment_with_checkpointing.py
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/experiment_params.yaml
+              subPath: experiment_params.yaml
+            - name: data
+              mountPath: /app/data
+            - name: results
+              mountPath: /app/results
+      volumes:
+        - name: config
+          configMap:
+            name: fp-tree-config
+            items:
+              - key: experiment_params.yaml
+                path: experiment_params.yaml
+        - name: data
+          persistentVolumeClaim:
+            claimName: fp-tree-data
+        - name: results
+          persistentVolumeClaim:
+            claimName: fp-tree-results

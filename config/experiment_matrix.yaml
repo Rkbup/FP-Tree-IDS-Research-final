@@ -1,0 +1,62 @@
+# Experiment Matrix
+#
+# This file defines a matrix of experiments to be run by the orchestrator.
+# Each entry in the `experiments` list represents a single, named experiment
+# with a specific set of parameters. The orchestrator will generate the
+# necessary scripts (for Docker or Kubernetes) to run all these experiments.
+#
+# Each experiment has:
+#   - name: A unique identifier for the experiment. This will be used to
+#           create a dedicated results directory (e.g., results/<name>/).
+#   - description: A brief explanation of the experiment's purpose.
+#   - params: A dictionary of parameters that will override the defaults.
+#             The structure mirrors `default.yaml`.
+
+experiments:
+  # --- Experiment Set 1: Varying min_support with a standard window size ---
+  - name: exp-ms0.01-ws10k
+    description: "Test with low min_support (0.01) and a 10k window."
+    params:
+      fp_tree:
+        min_support: 0.01
+        window_size: 10000
+
+  - name: exp-ms0.05-ws10k
+    description: "Test with medium min_support (0.05) and a 10k window."
+    params:
+      fp_tree:
+        min_support: 0.05
+        window_size: 10000
+
+  - name: exp-ms0.1-ws10k
+    description: "Test with high min_support (0.1) and a 10k window."
+    params:
+      fp_tree:
+        min_support: 0.1
+        window_size: 10000
+
+  # --- Experiment Set 2: Varying window_size with a standard min_support ---
+  - name: exp-ms0.02-ws20k
+    description: "Test with a medium min_support (0.02) and a larger 20k window."
+    params:
+      fp_tree:
+        min_support: 0.02
+        window_size: 20000
+
+  - name: exp-ms0.02-ws50k
+    description: "Test with a medium min_support (0.02) and a very large 50k window."
+    params:
+      fp_tree:
+        min_support: 0.02
+        window_size: 50000
+
+  # --- Experiment Set 3: Tuning a specific variant ---
+  - name: exp-pr-rebuild0.02
+    description: "Test Partial Rebuild with a lower rebuild threshold."
+    params:
+      fp_tree:
+        min_support: 0.02
+        window_size: 10000
+      variants:
+        partial_rebuild:
+          rebuild_threshold: 0.02

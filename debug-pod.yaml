@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fp-tree-debug
+  namespace: fp-tree
+spec:
+  restartPolicy: Never
+  containers:
+    - name: debug
+      image: fp-tree-ids:latest
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - name: data
+          mountPath: /app/data
+        - name: results
+          mountPath: /app/results
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: fp-tree-data
+    - name: results
+      persistentVolumeClaim:
+        claimName: fp-tree-results

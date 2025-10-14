@@ -24,12 +24,45 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import time
+import threading
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+import yaml  # Add yaml import
+from tqdm import tqdm
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def ctrl_c_handler(signum, frame):
+    """Handle Ctrl+C - Do nothing (ignore it)."""
+    print("\n💡 Ctrl+C detected. Use Ctrl+H to stop the process gracefully.")
+    print("   This prevents accidental interruption while copying error messages.")
+
+def shutdown_handler():
+    """Handle Ctrl+H for graceful shutdown."""
+    global shutdown_requested
+    try:
+        import keyboard
+        while True:
+            if keyboard.is_pressed('ctrl+h'):
+                if not shutdown_requested:
+                    print("\n\n⚠️  Ctrl+H pressed - Shutdown requested. Saving checkpoint and cleaning up...")
+                    shutdown_requested = True
+                break
+    except ImportError:
+        print("⚠️  Warning: 'keyboard' module not installed. Ctrl+H shutdown not available.")
+    except Exception as e:
+        print(f"⚠️  Keyboard listener error: {e}")
+
+# Register signal handlers and start keyboard listener
+signal.signal(signal.SIGINT, ctrl_c_handler)  # Ignore Ctrl+C
+keyboard_thread = threading.Thread(target=shutdown_handler, daemon=True)
+keyboard_thread.start()
 
 from src.preprocessing.data_loader import load_cic_ids2017
 from src.preprocessing.feature_engineering import FeatureEngineer
@@ -47,11 +80,43 @@ from src.evaluation.metrics import classification_metrics, pr_auc, throughput, m
 from src.evaluation.visualization import plot_throughput_latency
 
 
+def load_config(config_path: str) -> Dict:
+    """Load experiment configuration from a YAML file."""
+    if not config_path:
+        # Default config if no path is provided
+        print("Warning: No config file provided. Using default parameters.")
+        return {
+            'min_support': 0.005,
+            'window_size': 20000,
+            'rebuild_threshold': 0.1,
+            'decay_factor': 0.995,
+            'n_trees_hs': 25,
+            'tree_depth_hs': 15,
+            'n_trees_rcf': 100,
+            'sample_size_rcf': 256,
+            'encoding_dim_ae': 0.5,
+            'anomaly_threshold': 0.5,
+            'pattern_refresh_interval': 1
+        }
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for the main experiment."""
 
     parser = argparse.ArgumentParser(
         description="Run the sliding-window FP-Tree main experiment on CIC-IDS2017."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to the experiment configuration YAML file."
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="results",
+        help="Directory to save experiment results (defaults to results/)."
     )
     parser.add_argument(
         "--raw-dir",
@@ -128,7 +193,7 @@ def evaluate_streaming_performance(
             # FP‑tree variant using sliding window manager
             window_manager = SlidingWindowManager(alg, max_size=window_size)
             cached_patterns: Dict[Tuple[str, ...], int] = {}
-            for idx, txn in enumerate(transactions):
+            for idx, txn in tqdm(enumerate(transactions), total=n, desc=f"Processing {name}"):
                 window_manager.update(txn)
                 if idx == 0 or ((idx + 1) % refresh_interval) == 0:
                     cached_patterns = alg.mine_frequent_patterns()
@@ -146,7 +211,7 @@ def evaluate_streaming_performance(
         elif isinstance(alg, TwoTreeFPTree):
             # Two‑tree variant: effective window size is 2 * half_window_size
             cached_patterns: Dict[Tuple[str, ...], int] = {}
-            for idx, txn in enumerate(transactions):
+            for idx, txn in tqdm(enumerate(transactions), total=n, desc=f"Processing {name}"):
                 alg.insert_transaction(txn)
                 if idx == 0 or ((idx + 1) % refresh_interval) == 0:
                     cached_patterns = alg.mine_frequent_patterns()
@@ -163,7 +228,7 @@ def evaluate_streaming_performance(
             # Fit model on first window and then update per window
             warmup = min(window_size, n)
             alg.fit(X_full[:warmup])
-            for idx in range(warmup, n):
+            for idx in tqdm(range(warmup, n), total=n-warmup, desc=f"Processing {name}"):
                 x = X_full[idx:idx+1]
                 score = alg.score_samples(x)[0]
                 scores[idx] = score
@@ -177,9 +242,10 @@ def evaluate_streaming_performance(
                 if idx % 1000 == 0:
                     mem_usages.append(memory_usage_mb())
         elif isinstance(alg, RandomCutForest):
+            # Fit model on first window and then update per window
             warmup = min(window_size, n)
             alg.fit(X_full[:warmup])
-            for idx in range(warmup, n):
+            for idx in tqdm(range(warmup, n), total=n-warmup, desc=f"Processing {name}"):
                 x = X_full[idx:idx+1]
                 score = alg.score_samples(x)[0]
                 scores[idx] = score
@@ -192,9 +258,10 @@ def evaluate_streaming_performance(
                 if idx % 1000 == 0:
                     mem_usages.append(memory_usage_mb())
         elif isinstance(alg, OnlineAutoencoder):
+            # Fit model on first window and then update per window
             warmup = min(window_size, n)
             alg.fit(X_full[:warmup])
-            for idx in range(warmup, n):
+            for idx in tqdm(range(warmup, n), total=n-warmup, desc=f"Processing {name}"):
                 x = X_full[idx:idx+1]
                 score = alg.score_samples(x)[0]
                 scores[idx] = score
@@ -227,49 +294,57 @@ def evaluate_streaming_performance(
 
 def main() -> None:
     args = parse_args()
+    config = load_config(args.config)
+
     # Ensure results directories exist
-    Path('results/figures').mkdir(parents=True, exist_ok=True)
-    Path('results/tables').mkdir(parents=True, exist_ok=True)
-    Path('results/logs').mkdir(parents=True, exist_ok=True)
-    Path('results/statistical_analysis').mkdir(parents=True, exist_ok=True)
+    output_dir = Path(args.output_dir)
+    output_dir.joinpath('figures').mkdir(parents=True, exist_ok=True)
+    output_dir.joinpath('tables').mkdir(parents=True, exist_ok=True)
+    output_dir.joinpath('logs').mkdir(parents=True, exist_ok=True)
+
     # Load dataset (all days)
     data = load_cic_ids2017(raw_dir=args.raw_dir, days=args.days, verbose=not args.quiet)
     # Map labels to binary (Attack=1, Benign=0)
     labels = (data['Label'] != 'BENIGN').astype(int).to_numpy()
     # Feature engineering
-    fe = FeatureEngineer(n_bins=5)
+    fe = FeatureEngineer(n_bins=config.get('n_bins', 5))
     selected = fe.select_features(data)
     discretised = fe.discretize_continuous_features(selected)
     # Persist bin edges for reproducibility
-    fe.save_bin_edges('data/bin_edges.json')
+    fe.save_bin_edges(output_dir.joinpath('bin_edges.json'))
     # Build transactions
     tb = TransactionBuilder()
     transactions = tb.build_transactions(discretised)
-    # Prepare algorithms
+    
+    # Prepare algorithms using config
+    min_support = config['min_support']
+    window_size = config['window_size']
+    
     algorithms = {
-        'NR': NoReorderFPTree(min_support=0.005, window_size=20000),
-        'PR': PartialRebuildFPTree(min_support=0.005, window_size=20000, rebuild_threshold=0.1),
-        'TT': TwoTreeFPTree(min_support=0.005, half_window_size=10000),
-        'DH': DecayHybridFPTree(min_support=0.005, window_size=20000, decay_factor=0.995),
-        'HS-Trees': HalfSpaceTrees(n_trees=25, tree_depth=15),
-        'RCF': RandomCutForest(n_trees=100, sample_size=256),
-        'Autoencoder': OnlineAutoencoder(encoding_dim=0.5)
+        'NR': NoReorderFPTree(min_support=min_support, window_size=window_size),
+        'PR': PartialRebuildFPTree(min_support=min_support, window_size=window_size, rebuild_threshold=config['rebuild_threshold']),
+        'TT': TwoTreeFPTree(min_support=min_support, half_window_size=window_size // 2),
+        'DH': DecayHybridFPTree(min_support=min_support, window_size=window_size, decay_factor=config['decay_factor']),
+        'HS-Trees': HalfSpaceTrees(n_trees=config['n_trees_hs'], tree_depth=config['tree_depth_hs']),
+        'RCF': RandomCutForest(n_trees=config['n_trees_rcf'], sample_size=config['sample_size_rcf']),
+        'Autoencoder': OnlineAutoencoder(encoding_dim=config['encoding_dim_ae'])
     }
     # Evaluate performance
     results = evaluate_streaming_performance(
         algorithms=algorithms,
         transactions=transactions,
         labels=labels,
-        window_size=20000,
-        anomaly_threshold=0.5
+        window_size=window_size,
+        anomaly_threshold=config['anomaly_threshold'],
+        pattern_refresh_interval=config.get('pattern_refresh_interval', 1)
     )
     # Save performance metrics to CSV
     results_df = pd.DataFrame.from_dict(results, orient='index')
-    results_df.to_csv('results/tables/performance.csv')
+    results_df.to_csv(output_dir.joinpath('tables/performance.csv'))
     # Plot throughput–latency trade‑off
     plot_throughput_latency({name: {'throughput': m['throughput'], 'latency': m['latency']} for name, m in results.items()},
-                            'results/figures/throughput_latency.png')
-    print("Main experiment completed. Results saved to results/ directory.")
+                            str(output_dir.joinpath('figures/throughput_latency.png')))
+    print(f"Main experiment completed. Results saved to {args.output_dir} directory.")
 
 
 if __name__ == '__main__':
