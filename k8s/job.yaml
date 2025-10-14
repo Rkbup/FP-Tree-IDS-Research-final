@@ -28,11 +28,11 @@ spec:
               value: "1"
           resources:
             requests:
-              cpu: "2"
-              memory: 4Gi
-            limits:
-              cpu: "4"
+              cpu: "3"
               memory: 8Gi
+            limits:
+              cpu: "6"
+              memory: 16Gi
           volumeMounts:
             - name: config
               mountPath: /app/config/experiment_params.yaml
