@@ -3,5 +3,6 @@
         "-workbench.action.terminal.sendSequence"
     ],
     "terminal.integrated.sendKeybindingsToShell": false,
-    "terminal.integrated.allowChords": true
+    "terminal.integrated.allowChords": true,
+    "makefile.configureOnOpen": true
 }

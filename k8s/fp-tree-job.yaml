@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fp-tree-main-experiment
+  namespace: fp-tree
+spec:
+  template:
+    spec:
+      containers:
+      - name: main-experiment
+        image: fp-tree-ids:latest
+        command: ["/bin/bash", "-c", "source .venv/bin/activate && python experiments/main_experiment.py"]
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+          limits:
+            memory: "24Gi"
+            cpu: "8"
+        volumeMounts:
+        - name: results-vol
+          mountPath: /app/results
+      restartPolicy: Never
+      volumes:
+      - name: results-vol
+        persistentVolumeClaim:
+          claimName: fp-tree-results
