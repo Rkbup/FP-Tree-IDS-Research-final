@@ -2,19 +2,21 @@
 main_experiment.py
 ==================
 
-Run the primary FP-Tree IDS experiment on CIC-IDS2017.
-Loads data, performs feature engineering, converts to transactions,
-evaluates FP-tree variants and baselines, and saves results under
-`results/`.
+This script reproduces the primary performance and detection results
+reported in the paper.  It loads the CIC‑IDS2017 dataset, performs
+feature engineering and transaction conversion, instantiates each
+algorithm (FP‑tree variants and baselines), processes the data in a
+streaming fashion and records metrics including throughput, latency,
+memory usage, precision, recall, F1 and PR‑AUC.  The results are
+written to CSV files and plots stored under ``results/``.
 
-Usage (project root):
-    python experiments/main_experiment.py [--config CONFIG]
-                                          [--output-dir DIR]
-                                          [--raw-dir DATA_DIR]
-                                          [--days Monday Tuesday ...]
-                                          [--quiet]
-                                          [--max-threads N]
-                                          [--fast-mode]
+Usage
+-----
+Run this script from the project root after downloading the dataset:
+
+```bash
+python experiments/main_experiment.py
+```
 """
 
 from __future__ import annotations
@@ -25,13 +27,13 @@ import os
 import signal
 import time
 import threading
-import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-import yaml
+import yaml  # Add yaml import
+from tqdm import tqdm
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -62,7 +64,7 @@ def shutdown_handler():
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 keyboard_thread = threading.Thread(target=shutdown_handler, daemon=True)
 keyboard_thread.start()
-print("Ctrl+C ignored for safe copy. Press Ctrl+H to stop.")
+print("Ctrl+C is ignored for safe copying. Press Ctrl+H to stop gracefully.")
 
 from src.preprocessing.data_loader import load_cic_ids2017
 from src.preprocessing.feature_engineering import FeatureEngineer
@@ -133,95 +135,78 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Suppress per-file loading messages for the dataset.",
     )
-    parser.add_argument(
-        "--max-threads",
-        type=int,
-        default=None,
-        help="Limit worker processes/threads to N (defaults to CPU count).",
-    )
-    parser.add_argument(
-        "--fast-mode",
-        action="store_true",
-        help="Faster run: limit to a small subset of transactions.",
-    )
     return parser.parse_args()
 
 
-def evaluate_streaming_performance(
+def Get-Content [main_experiment_live.log](http://_vscodecontentref_/1) -Waitevaluate_streaming_performance(
     algorithms: Dict[str, object],
     transactions: List[List[str]],
     labels: np.ndarray,
     window_size: int,
     anomaly_threshold: float = 0.5,
-    pattern_refresh_interval: int = 1,
-    workers: int | None = None,
+    pattern_refresh_interval: int = 1
 ) -> Dict[str, Dict[str, float]]:
-    """Evaluate algorithms over a transaction stream.
+    """Process a stream of transactions with multiple algorithms.
 
-    - FP-tree variants use a sliding window and mine patterns periodically.
-    - Baselines operate on one-hot vectors with periodic refits.
+    Parameters
+    ----------
+    algorithms : dict
+        Mapping from algorithm names to instantiated objects.  FP‑tree
+        variants must implement ``insert_transaction`` and ``remove_transaction``.
+        Baseline models must implement ``fit`` and ``score_samples``.
+    transactions : list of list of str
+        Discretised transactions aligned with ``labels``.
+    labels : np.ndarray
+        Binary labels (0/1) indicating benign (0) or attack (1) flows.
+    window_size : int
+        Maximum number of transactions to retain in the sliding window.  For
+        two‑tree the effective window size is ``2 * half_window_size`` and
+        should be passed accordingly.
+    anomaly_threshold : float, optional
+        Threshold above which anomaly scores are considered positive.  The
+        same threshold is used for all algorithms for simplicity.
+
+    Returns
+    -------
+    dict
+        Summary of performance metrics for each algorithm.
     """
     n = len(transactions)
     results: Dict[str, Dict[str, float]] = {}
-
-    # Precompute one-hot features for baselines
+    # Precompute vectorised baseline features: convert transactions back to
+    # one‑hot encoded vectors for baseline models
+    # Build vocabulary of items
     vocab = sorted({item for txn in transactions for item in txn})
-    idx_of = {v: i for i, v in enumerate(vocab)}
-    X_full = np.zeros((n, len(vocab)), dtype=np.int8)
-    for i, txn in enumerate(transactions):
-        for it in txn:
-            X_full[i, idx_of[it]] = 1
-
-    # Helper to process one transaction for Pool
-    def _process(args):
-        (name, alg, idx, txn, window_manager, cached_patterns,
-         anomaly_threshold, refresh_interval) = args
-        from src.algorithms.fp_tree import FPTree  # local import for Pool pickling
-        from src.algorithms.variants.partial_rebuild import PartialRebuildFPTree
-        from src.algorithms.variants.two_tree import TwoTreeFPTree
-        from src.algorithms.variants.decay_hybrid import DecayHybridFPTree
-        from src.algorithms.baselines.half_space_trees import HalfSpaceTrees
-        from src.algorithms.baselines.random_cut_forest import RandomCutForest
-        from src.algorithms.baselines.online_autoencoder import OnlineAutoencoder
-
-        if isinstance(alg, (FPTree, PartialRebuildFPTree, DecayHybridFPTree)):
-            window_manager.insert(txn)
-            if idx == 0 or ((idx + 1) % max(1, refresh_interval) == 0):
-                cached_patterns.update(alg.mine_frequent_patterns())
-            score = 1.0
+        def evaluate_streaming_performance(
+            algorithms: Dict[str, object],
+            transactions: List[List[str]],
+            labels: np.ndarray,
+            window_size: int,
+            anomaly_threshold: float = 0.5,
+            pattern_refresh_interval: int = 1
+        ) -> Dict[str, Dict[str, float]]:
+            """Process a stream of transactions with multiple algorithms."""
+            alg.insert_transaction(txn)
+            if idx == 0 or ((idx + 1) % refresh_interval) == 0:
+                cached_patterns = alg.mine_frequent_patterns()
             if cached_patterns:
                 max_support = max(cached_patterns.values())
-                score = 1.0 - (max_support / max(1, len(window_manager.window)))
-            pred = 1 if score >= anomaly_threshold else 0
-            return score, pred
-        elif isinstance(alg, TwoTreeFPTree):
-            alg.insert_transaction(txn)
-            patterns = alg.mine_frequent_patterns()
-            score = 1.0
-            if patterns:
-                max_support = max(patterns.values())
                 score = 1.0 - (max_support / (2 * alg.half_window_size))
-            pred = 1 if score >= anomaly_threshold else 0
-            return score, pred
-        elif isinstance(alg, (HalfSpaceTrees, RandomCutForest, OnlineAutoencoder)):
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, HalfSpaceTrees):
             x = X_full[idx:idx+1]
-            score = float(alg.score_samples(x)[0])
-            pred = 1 if score >= anomaly_threshold else 0
-            return score, pred
+            score = alg.score_samples(x)[0]
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, RandomCutForest):
+            x = X_full[idx:idx+1]
+            score = alg.score_samples(x)[0]
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, OnlineAutoencoder):
+            x = X_full[idx:idx+1]
+            score = alg.score_samples(x)[0]
+            return score, 1 if score >= anomaly_threshold else 0
         else:
             raise TypeError(f"Unsupported algorithm type: {type(alg)}")
-
-    from src.streaming.window_manager import SlidingWindowManager
-    from src.evaluation.metrics import (
-        classification_metrics,
-        pr_auc,
-        throughput,
-        memory_usage_mb,
-        bootstrap_confidence_interval,
-    )
-
-    refresh_interval = max(1, pattern_refresh_interval)
-    num_workers = workers or max(1, mp.cpu_count())
 
     for name, alg in algorithms.items():
         print(f"Evaluating {name} ...")
@@ -229,60 +214,43 @@ def evaluate_streaming_performance(
         y_pred = np.zeros(n, dtype=np.int8)
         scores = np.zeros(n, dtype=np.float32)
         mem_usages: List[float] = []
-
+        refresh_interval = max(1, pattern_refresh_interval)
         window_manager = None
-        cached_patterns: Dict[str, int] = {}
-        try:
-            from src.algorithms.fp_tree import FPTree
-            from src.algorithms.variants.partial_rebuild import PartialRebuildFPTree
-            from src.algorithms.variants.decay_hybrid import DecayHybridFPTree
-            if isinstance(alg, (FPTree, PartialRebuildFPTree, DecayHybridFPTree)):
-                window_manager = SlidingWindowManager(alg, max_size=window_size)
-        except Exception:
-            pass
-
+        cached_patterns = None
+        if isinstance(alg, (FPTree, PartialRebuildFPTree, DecayHybridFPTree)):
+            window_manager = SlidingWindowManager(alg, max_size=window_size)
+            cached_patterns = {}
         args_list = [
-            (name, alg, idx, txn, window_manager, cached_patterns, anomaly_threshold, refresh_interval)
+            (name, alg, idx, txn, window_manager, cached_patterns, anomaly_threshold, refresh_interval, X_full)
             for idx, txn in enumerate(transactions)
         ]
-
-        if num_workers == 1:
-            results_list = [_process(a) for a in args_list]
-        else:
-            with mp.Pool(processes=num_workers) as pool:
-                results_list = pool.map(_process, args_list, chunksize=100)
-
+        with multiprocessing.Pool(cpu_count) as pool:
+            results_list = pool.map(process_transaction, args_list)
         for idx, (score, pred) in enumerate(results_list):
             scores[idx] = score
             y_pred[idx] = pred
             if idx % 1000 == 0:
                 mem_usages.append(memory_usage_mb())
+            # Print progress percentage every 1% or 1000 transactions
             if n > 0 and (idx % max(1, n // 100) == 0 or idx == n - 1):
                 percent = int((idx + 1) / n * 100)
-                print(f"Progress: {percent}%", end='\r', flush=True)
-
-        elapsed = time.time() - start_time
+                print(f"Progress: {percent}% complete", end='\r', flush=True)
+        end_time = time.time()
+        elapsed = end_time - start_time
         metrics = classification_metrics(labels, y_pred)
         metrics['pr_auc'] = pr_auc(labels, scores)
         metrics['throughput'] = throughput(n, elapsed)
-        metrics['latency'] = (elapsed / max(1, n)) * 1000.0
+        metrics['latency'] = (elapsed / max(1, n)) * 1000  # ms per flow
         metrics['memory'] = float(np.mean(mem_usages)) if mem_usages else memory_usage_mb()
-        ci_lower, ci_upper = bootstrap_confidence_interval(metrics['f1'] for _ in range(30))
+        ci_lower, ci_upper = bootstrap_confidence_interval(metrics['f1'] for _ in range(30))  # replicate mean
         metrics['f1_ci_lower'] = ci_lower
         metrics['f1_ci_upper'] = ci_upper
         results[name] = metrics
-
     return results
 
 
 def main() -> None:
     args = parse_args()
-    # Optional thread limiting via env for BLAS/NumExpr
-    if args.max_threads and args.max_threads > 0:
-        for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-            os.environ[k] = str(args.max_threads)
-    workers = args.max_threads if (args.max_threads and args.max_threads > 0) else None
-
     config = load_config(args.config)
 
     # Ensure results directories exist
@@ -304,11 +272,6 @@ def main() -> None:
     # Build transactions
     tb = TransactionBuilder()
     transactions = tb.build_transactions(discretised)
-    if args.fast_mode and len(transactions) > 0:
-        # Keep a manageable subset for quick runs
-        max_txn = min(100_000, len(transactions))
-        transactions = transactions[:max_txn]
-        labels = labels[:max_txn]
     
     # Prepare algorithms using config
     min_support = config['min_support']
@@ -330,8 +293,7 @@ def main() -> None:
         labels=labels,
         window_size=window_size,
         anomaly_threshold=config['anomaly_threshold'],
-        pattern_refresh_interval=config.get('pattern_refresh_interval', 1),
-        workers=workers,
+        pattern_refresh_interval=config.get('pattern_refresh_interval', 1)
     )
     # Save performance metrics to CSV
     results_df = pd.DataFrame.from_dict(results, orient='index')
@@ -344,3 +306,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

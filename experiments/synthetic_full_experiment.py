@@ -290,113 +290,79 @@ def evaluate_streaming_performance(
     print(f"  [OK] F1-Score: {metrics['f1']:.4f}")
     print(f"  [OK] PR-AUC: {metrics['pr_auc']:.4f}")
     print(f"  [OK] Throughput: {metrics['throughput']:.2f} flows/sec")
-    print(f"  [OK] Latency: {metrics['latency']:.4f} ms/flow")
-    print(f"  [OK] Memory: {metrics['memory']:.2f} MB")
-    
+
+    import multiprocessing
+    cpu_count = multiprocessing.cpu_count()
+    print(f"Using {cpu_count} CPU cores for parallel processing.")
+
+    def process_transaction(args):
+        name, alg, idx, txn, window_manager, cached_patterns, anomaly_threshold, X_full = args
+        score = 1.0
+        if isinstance(alg, (NoReorderFPTree, PartialRebuildFPTree, DecayHybridFPTree)):
+            window_manager.update(txn)
+            if idx == 0 or ((idx + 1) % PATTERN_REFRESH_INTERVAL) == 0:
+                cached_patterns = alg.mine_frequent_patterns()
+            if cached_patterns:
+                max_support = max(cached_patterns.values())
+                score = 1.0 - (max_support / max(1, len(window_manager.window)))
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, TwoTreeFPTree):
+            alg.insert_transaction(txn)
+            if idx == 0 or ((idx + 1) % PATTERN_REFRESH_INTERVAL) == 0:
+                cached_patterns = alg.mine_frequent_patterns()
+            if cached_patterns:
+                max_support = max(cached_patterns.values())
+                score = 1.0 - (max_support / (2 * alg.half_window_size))
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, HalfSpaceTrees):
+            x = X_full[idx:idx+1]
+            score = alg.score_samples(x)[0]
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, RandomCutForest):
+            x = X_full[idx:idx+1]
+            score = alg.score_samples(x)[0]
+            return score, 1 if score >= anomaly_threshold else 0
+        elif isinstance(alg, OnlineAutoencoder):
+            x = X_full[idx:idx+1]
+            score = alg.score_samples(x)[0]
+            return score, 1 if score >= anomaly_threshold else 0
+        else:
+            raise TypeError(f"Unsupported algorithm type: {type(alg)}")
+
+    for name, alg in algorithms.items():
+        print(f"\nEvaluating {name}...")
+        start_time = time.time()
+        y_pred = np.zeros(n, dtype=np.int8)
+        scores = np.zeros(n, dtype=np.float32)
+        mem_usages = []
+        window_manager = None
+        cached_patterns = None
+        if isinstance(alg, (NoReorderFPTree, PartialRebuildFPTree, DecayHybridFPTree)):
+            window_manager = SlidingWindowManager(alg, max_size=window_size)
+            cached_patterns = {}
+        args_list = [
+            (name, alg, idx, txn, window_manager, cached_patterns, anomaly_threshold, X_full)
+            for idx, txn in enumerate(transactions)
+        ]
+        with multiprocessing.Pool(cpu_count) as pool:
+            results_list = pool.map(process_transaction, args_list)
+        for idx, (score, pred) in enumerate(results_list):
+            scores[idx] = score
+            y_pred[idx] = pred
+            if idx % 1000 == 0:
+                mem_usages.append(memory_usage_mb())
+            # Print progress percentage every 1% or 1000 transactions
+            if n > 0 and (idx % max(1, n // 100) == 0 or idx == n - 1):
+                percent = int((idx + 1) / n * 100)
+                print(f"Progress: {percent}% complete", end='\r', flush=True)
+        end_time = time.time()
+        elapsed = end_time - start_time
+        metrics = classification_metrics(labels, y_pred)
+        metrics['pr_auc'] = pr_auc(labels, scores)
+        metrics['throughput'] = throughput(n, elapsed)
+        metrics['latency'] = (elapsed / max(1, n)) * 1000  # ms per flow
+        metrics['memory'] = float(np.mean(mem_usages)) if mem_usages else memory_usage_mb()
+        results[name] = metrics
+        delete_checkpoint(name)
     return results
-
-
-def main():
-    """Main function to run the synthetic dataset experiment."""
-    print("=" * 60)
-    print("COMPREHENSIVE SYNTHETIC DATASET EVALUATION")
-    print("=" * 60)
-    
-    # Ensure results directories exist
-    Path('results/figures').mkdir(parents=True, exist_ok=True)
-    Path('results/tables').mkdir(parents=True, exist_ok=True)
-    
-    # Load synthetic dataset
-    print(f"\n[1/4] Loading synthetic dataset from {SYNTHETIC_DATA_PATH}...")
-    df = pd.read_csv(SYNTHETIC_DATA_PATH)
-    print(f"  [OK] Loaded {len(df)} records")
-    
-    # Feature engineering
-    print("\n[2/4] Performing feature engineering...")
-    fe = FeatureEngineer(n_bins=5)
-    df_selected = fe.select_features(df)
-    df_featured = fe.discretize_continuous_features(df_selected)
-    
-    # Convert labels to binary
-    if 'Label' in df_featured.columns:
-        labels = (df_featured['Label'].str.upper() != 'BENIGN').astype(int).to_numpy()
-    else:
-        labels = np.zeros(len(df_featured))
-    
-    # Build transactions
-    tb = TransactionBuilder()
-    transactions = tb.build_transactions(df_featured.drop(columns=['Label'], errors='ignore'))
-    print(f"  [OK] Created {len(transactions)} transactions")
-    print(f"  [OK] Attack ratio: {labels.sum() / len(labels) * 100:.2f}%")
-    
-    # Prepare all algorithms
-    print("\n[3/4] Initializing algorithms...")
-    algorithms = {
-        'NR': NoReorderFPTree(min_support=MIN_SUPPORT, window_size=WINDOW_SIZE),
-        'PR': PartialRebuildFPTree(min_support=MIN_SUPPORT, window_size=WINDOW_SIZE, rebuild_threshold=0.1),
-        'TT': TwoTreeFPTree(min_support=MIN_SUPPORT, half_window_size=WINDOW_SIZE // 2),
-        'DH': DecayHybridFPTree(min_support=MIN_SUPPORT, window_size=WINDOW_SIZE, decay_factor=0.995),
-        'HS-Trees': HalfSpaceTrees(n_trees=25, tree_depth=15),
-        'RCF': RandomCutForest(n_trees=100, sample_size=256),
-        'Autoencoder': OnlineAutoencoder(encoding_dim=0.5)
-    }
-    print(f"  [OK] Initialized {len(algorithms)} algorithms")
-    
-    # Evaluate all algorithms
-    print("\n[4/4] Running comprehensive evaluation...")
-    print("-" * 60)
-    results = evaluate_streaming_performance(
-        algorithms=algorithms,
-        transactions=transactions,
-        labels=labels,
-        window_size=WINDOW_SIZE,
-        anomaly_threshold=ANOMALY_THRESHOLD
-    )
-    
-    # Save results
-    print("\n" + "=" * 60)
-    print("RESULTS SUMMARY")
-    print("=" * 60)
-    
-    results_df = pd.DataFrame.from_dict(results, orient='index')
-    results_df = results_df.round(4)
-    
     print("\n" + results_df.to_string())
-    
-    # Save to CSV
-    csv_path = 'results/tables/synthetic_performance.csv'
-    results_df.to_csv(csv_path)
-    print(f"\n[OK] Results saved to: {csv_path}")
-    
-    # Plot throughput-latency trade-off
-    plot_data = {
-        name: {
-            'throughput': m['throughput'],
-            'latency': m['latency']
-        }
-        for name, m in results.items()
-    }
-    plot_path = 'results/figures/synthetic_throughput_latency.png'
-    plot_throughput_latency(plot_data, plot_path)
-    print(f"[OK] Throughput-Latency plot saved to: {plot_path}")
-    
-    # Find best performers
-    print("\n" + "=" * 60)
-    print("BEST PERFORMERS")
-    print("=" * 60)
-    
-    best_f1 = results_df['f1'].idxmax()
-    best_throughput = results_df['throughput'].idxmax()
-    best_memory = results_df['memory'].idxmin()
-    
-    print(f"\n[TOP] Best F1-Score: {best_f1} ({results_df.loc[best_f1, 'f1']:.4f})")
-    print(f"[TOP] Best Throughput: {best_throughput} ({results_df.loc[best_throughput, 'throughput']:.2f} flows/sec)")
-    print(f"[TOP] Lowest Memory: {best_memory} ({results_df.loc[best_memory, 'memory']:.2f} MB)")
-    
-    print("\n" + "=" * 60)
-    print("EVALUATION COMPLETE!")
-    print("=" * 60)
-
-
-if __name__ == '__main__':
-    main()
