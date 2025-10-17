@@ -45,7 +45,8 @@ class MaxResourceController:
         self.is_active = True
         
         # Register signal handlers
-        signal.signal(signal.SIGINT, self.ctrl_c_ignore_handler)  # Ignore Ctrl+C
+        # Fully ignore Ctrl+C so copying text in terminal doesn't kill the process
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, self.graceful_shutdown)
         
         # Start keyboard listener for Ctrl+H

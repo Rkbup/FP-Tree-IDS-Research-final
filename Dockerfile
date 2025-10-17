@@ -20,8 +20,14 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copy the rest of the project files (excluding data initially)
 COPY . .
+
+# Copy data explicitly to ensure it's included
+COPY data/raw/MachineLearningCSV/MachineLearningCVE/*.csv /app/data/raw/MachineLearningCSV/MachineLearningCVE/
+
+# Verify CSV files are present
+RUN ls -la /app/data/raw/MachineLearningCSV/MachineLearningCVE/ && echo "CSV files found!"
 
 # Create checkpoint directory
 RUN mkdir -p /app/checkpoints

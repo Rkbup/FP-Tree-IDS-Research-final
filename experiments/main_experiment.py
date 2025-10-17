@@ -60,9 +60,11 @@ def shutdown_handler():
         print(f"⚠️  Keyboard listener error: {e}")
 
 # Register signal handlers and start keyboard listener
-signal.signal(signal.SIGINT, ctrl_c_handler)  # Ignore Ctrl+C
+# Fully ignore Ctrl+C so copying text in terminal doesn't kill the process
+signal.signal(signal.SIGINT, signal.SIG_IGN)
 keyboard_thread = threading.Thread(target=shutdown_handler, daemon=True)
 keyboard_thread.start()
+print("Ctrl+C is ignored for safe copying. Press Ctrl+H to stop gracefully.")
 
 from src.preprocessing.data_loader import load_cic_ids2017
 from src.preprocessing.feature_engineering import FeatureEngineer

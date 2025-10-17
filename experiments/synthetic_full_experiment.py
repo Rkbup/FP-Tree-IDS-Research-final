@@ -35,9 +35,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 shutdown_requested = False
 
 def ctrl_c_handler(signum, frame):
-    """Handle Ctrl+C - Do nothing (ignore it)."""
-    print("\n💡 Ctrl+C detected. Use Ctrl+H to stop the process gracefully.")
-    print("   This prevents accidental interruption while copying error messages.")
+    """Deprecated: Ctrl+C handler (no-op)."""
+    # Intentionally left as a no-op for backward compatibility.
+    # SIGINT is fully ignored via signal.SIG_IGN below.
+    pass
 
 def shutdown_handler():
     """Handle Ctrl+H for graceful shutdown."""
@@ -46,18 +47,21 @@ def shutdown_handler():
         try:
             if keyboard.is_pressed('ctrl+h'):
                 if not shutdown_requested:
-                    print("\n\n⚠️  Ctrl+H pressed - Shutdown requested. Saving checkpoint and cleaning up...")
+                    print("\n\n[WARN] Ctrl+H pressed - Shutdown requested. Saving checkpoint and cleaning up...")
                     shutdown_requested = True
                 break
         except:
             pass
 
 # Register signal handlers
-signal.signal(signal.SIGINT, ctrl_c_handler)  # Ignore Ctrl+C
+# Fully ignore Ctrl+C so copying text in terminal doesn't kill the process
+signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 # Start keyboard listener for Ctrl+H in separate thread
 keyboard_thread = threading.Thread(target=shutdown_handler, daemon=True)
 keyboard_thread.start()
+
+print("[INFO] Ctrl+C is ignored for safe copying. Press Ctrl+H to stop gracefully.")
 
 from src.preprocessing.feature_engineering import FeatureEngineer
 from src.preprocessing.transaction_builder import TransactionBuilder
@@ -143,7 +147,7 @@ def evaluate_streaming_performance(
         
         if checkpoint:
             start_idx = checkpoint['last_index'] + 1
-            print(f"  ℹ Resuming from checkpoint at index {start_idx}/{n}")
+            print(f"  [INFO] Resuming from checkpoint at index {start_idx}/{n}")
         
         start_time = time.time()
         
@@ -164,13 +168,13 @@ def evaluate_streaming_performance(
             
             # Rebuild window state from checkpoint
             if start_idx > 0:
-                print(f"  ℹ Rebuilding window state from scratch...")
+                print(f"  [INFO] Rebuilding window state from scratch...")
                 for idx in tqdm(range(start_idx), desc="Rebuilding window", leave=False):
                     window_manager.update(transactions[idx])
             
             for idx in tqdm(range(start_idx, n), total=n, initial=start_idx, desc=f"Processing {name}"):
                 if shutdown_requested:
-                    print(f"\n  ⚠️  Shutdown requested. Saving checkpoint at index {idx}...")
+                    print(f"\n  [WARN] Shutdown requested. Saving checkpoint at index {idx}...")
                     save_checkpoint(name, idx - 1, y_pred, scores, mem_usages)
                     return results
                     
@@ -200,13 +204,13 @@ def evaluate_streaming_performance(
             
             # Rebuild tree state from checkpoint
             if start_idx > 0:
-                print(f"  ℹ Rebuilding tree state from scratch...")
+                print(f"  [INFO] Rebuilding tree state from scratch...")
                 for idx in tqdm(range(start_idx), desc="Rebuilding tree", leave=False):
                     alg.insert_transaction(transactions[idx])
             
             for idx in tqdm(range(start_idx, n), total=n, initial=start_idx, desc=f"Processing {name}"):
                 if shutdown_requested:
-                    print(f"\n  ⚠️  Shutdown requested. Saving checkpoint at index {idx}...")
+                    print(f"\n  [WARN] Shutdown requested. Saving checkpoint at index {idx}...")
                     save_checkpoint(name, idx - 1, y_pred, scores, mem_usages)
                     return results
                     
@@ -239,12 +243,12 @@ def evaluate_streaming_performance(
                 start_idx = warmup
             else:
                 # Rebuild model state from checkpoint
-                print(f"  ℹ Rebuilding model state from scratch...")
+                print(f"  [INFO] Rebuilding model state from scratch...")
                 alg.fit(X_full[:warmup])
             
             for idx in tqdm(range(start_idx, n), total=n, initial=start_idx, desc=f"Processing {name}"):
                 if shutdown_requested:
-                    print(f"\n  ⚠️  Shutdown requested. Saving checkpoint at index {idx}...")
+                    print(f"\n  [WARN] Shutdown requested. Saving checkpoint at index {idx}...")
                     save_checkpoint(name, idx - 1, y_pred, scores, mem_usages)
                     return results
                     
@@ -281,13 +285,13 @@ def evaluate_streaming_performance(
         # Delete checkpoint after successful completion
         delete_checkpoint(name)
         
-        print(f"  ✓ Precision: {metrics['precision']:.4f}")
-        print(f"  ✓ Recall: {metrics['recall']:.4f}")
-        print(f"  ✓ F1-Score: {metrics['f1']:.4f}")
-        print(f"  ✓ PR-AUC: {metrics['pr_auc']:.4f}")
-        print(f"  ✓ Throughput: {metrics['throughput']:.2f} flows/sec")
-        print(f"  ✓ Latency: {metrics['latency']:.4f} ms/flow")
-        print(f"  ✓ Memory: {metrics['memory']:.2f} MB")
+    print(f"  [OK] Precision: {metrics['precision']:.4f}")
+    print(f"  [OK] Recall: {metrics['recall']:.4f}")
+    print(f"  [OK] F1-Score: {metrics['f1']:.4f}")
+    print(f"  [OK] PR-AUC: {metrics['pr_auc']:.4f}")
+    print(f"  [OK] Throughput: {metrics['throughput']:.2f} flows/sec")
+    print(f"  [OK] Latency: {metrics['latency']:.4f} ms/flow")
+    print(f"  [OK] Memory: {metrics['memory']:.2f} MB")
     
     return results
 
@@ -305,7 +309,7 @@ def main():
     # Load synthetic dataset
     print(f"\n[1/4] Loading synthetic dataset from {SYNTHETIC_DATA_PATH}...")
     df = pd.read_csv(SYNTHETIC_DATA_PATH)
-    print(f"  ✓ Loaded {len(df)} records")
+    print(f"  [OK] Loaded {len(df)} records")
     
     # Feature engineering
     print("\n[2/4] Performing feature engineering...")
@@ -322,8 +326,8 @@ def main():
     # Build transactions
     tb = TransactionBuilder()
     transactions = tb.build_transactions(df_featured.drop(columns=['Label'], errors='ignore'))
-    print(f"  ✓ Created {len(transactions)} transactions")
-    print(f"  ✓ Attack ratio: {labels.sum() / len(labels) * 100:.2f}%")
+    print(f"  [OK] Created {len(transactions)} transactions")
+    print(f"  [OK] Attack ratio: {labels.sum() / len(labels) * 100:.2f}%")
     
     # Prepare all algorithms
     print("\n[3/4] Initializing algorithms...")
@@ -336,7 +340,7 @@ def main():
         'RCF': RandomCutForest(n_trees=100, sample_size=256),
         'Autoencoder': OnlineAutoencoder(encoding_dim=0.5)
     }
-    print(f"  ✓ Initialized {len(algorithms)} algorithms")
+    print(f"  [OK] Initialized {len(algorithms)} algorithms")
     
     # Evaluate all algorithms
     print("\n[4/4] Running comprehensive evaluation...")
@@ -362,7 +366,7 @@ def main():
     # Save to CSV
     csv_path = 'results/tables/synthetic_performance.csv'
     results_df.to_csv(csv_path)
-    print(f"\n✓ Results saved to: {csv_path}")
+    print(f"\n[OK] Results saved to: {csv_path}")
     
     # Plot throughput-latency trade-off
     plot_data = {
@@ -374,7 +378,7 @@ def main():
     }
     plot_path = 'results/figures/synthetic_throughput_latency.png'
     plot_throughput_latency(plot_data, plot_path)
-    print(f"✓ Throughput-Latency plot saved to: {plot_path}")
+    print(f"[OK] Throughput-Latency plot saved to: {plot_path}")
     
     # Find best performers
     print("\n" + "=" * 60)
@@ -385,9 +389,9 @@ def main():
     best_throughput = results_df['throughput'].idxmax()
     best_memory = results_df['memory'].idxmin()
     
-    print(f"\n🏆 Best F1-Score: {best_f1} ({results_df.loc[best_f1, 'f1']:.4f})")
-    print(f"🏆 Best Throughput: {best_throughput} ({results_df.loc[best_throughput, 'throughput']:.2f} flows/sec)")
-    print(f"🏆 Lowest Memory: {best_memory} ({results_df.loc[best_memory, 'memory']:.2f} MB)")
+    print(f"\n[TOP] Best F1-Score: {best_f1} ({results_df.loc[best_f1, 'f1']:.4f})")
+    print(f"[TOP] Best Throughput: {best_throughput} ({results_df.loc[best_throughput, 'throughput']:.2f} flows/sec)")
+    print(f"[TOP] Lowest Memory: {best_memory} ({results_df.loc[best_memory, 'memory']:.2f} MB)")
     
     print("\n" + "=" * 60)
     print("EVALUATION COMPLETE!")
