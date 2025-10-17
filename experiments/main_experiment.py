@@ -1,8 +1,6 @@
 """
 main_experiment.py
-==================
-
-Run the primary FP-Tree IDS experiment on CIC-IDS2017.
+==================Run the primary FP-Tree IDS experiment on CIC-IDS2017.
 Loads data, performs feature engineering, converts to transactions,
 evaluates FP-tree variants and baselines, and saves results under
 `results/`.
@@ -22,40 +20,41 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
-import time
-import threading
-import multiprocessing as mp
-from pathlib import Path
-from typing import Dict, List
 
-import numpy as np
-import pandas as pd
-import yaml
+algorithms = {
+    'NR': NoReorderFPTree(min_support=min_support, window_size=window_size),
+    'PR': PartialRebuildFPTree(min_support=min_support, window_size=window_size, rebuild_threshold=config['rebuild_threshold']),
+    'TT': TwoTreeFPTree(min_support=min_support, half_window_size=window_size // 2),
+    'DH': DecayHybridFPTree(min_support=min_support, window_size=window_size, decay_factor=config['decay_factor']),
+    'HS-Trees': HalfSpaceTrees(n_trees=config['n_trees_hs'], tree_depth=config['tree_depth_hs']),
+    'RCF': RandomCutForest(n_trees=config['n_trees_rcf'], sample_size=config['sample_size_rcf']),
+    'Autoencoder': OnlineAutoencoder(encoding_dim=config['encoding_dim_ae'])
+}
+# Evaluate performance (single, well-formed call)
+results = evaluate_streaming_performance(
+    algorithms=algorithms,
+    transactions=transactions,
+    labels=labels,
+    window_size=window_size,
+    anomaly_threshold=config['anomaly_threshold'],
+    pattern_refresh_interval=config.get('pattern_refresh_interval', 1),
+    workers=workers
+    )
 
-# Global flag for graceful shutdown
-shutdown_requested = False
+    # Save performance metrics to CSV
+    results_df = pd.DataFrame.from_dict(results, orient='index')
+    results_df.to_csv(output_dir.joinpath('tables/performance.csv'))
 
-def ctrl_c_handler(signum, frame):
-    """Handle Ctrl+C - Do nothing (ignore it)."""
-    print("\n💡 Ctrl+C detected. Use Ctrl+H to stop the process gracefully.")
-    print("   This prevents accidental interruption while copying error messages.")
-
-def shutdown_handler():
-    """Handle Ctrl+H for graceful shutdown."""
-    global shutdown_requested
+    # Plot throughput–latency trade‑off (guarded)
     try:
-        import keyboard
-        while True:
-            if keyboard.is_pressed('ctrl+h'):
-                if not shutdown_requested:
-                    print("\n\n⚠️  Ctrl+H pressed - Shutdown requested. Saving checkpoint and cleaning up...")
-                    shutdown_requested = True
-                break
-    except ImportError:
-        print("⚠️  Warning: 'keyboard' module not installed. Ctrl+H shutdown not available.")
+        plot_throughput_latency(
+            {name: {'throughput': m.get('throughput', 0), 'latency': m.get('latency', 0)} for name, m in results.items()},
+            str(output_dir.joinpath('figures/throughput_latency.png'))
+        )
     except Exception as e:
-        print(f"⚠️  Keyboard listener error: {e}")
+        print(f"Warning: plotting failed: {e}")
+
+    print(f"Main experiment completed. Results saved to {args.output_dir} directory.")
 
 # Register signal handlers and start keyboard listener
 # Fully ignore Ctrl+C so copying text in terminal doesn't kill the process
@@ -332,6 +331,13 @@ def main() -> None:
         anomaly_threshold=config['anomaly_threshold'],
         pattern_refresh_interval=config.get('pattern_refresh_interval', 1),
         workers=workers,
+ts = evaluate_streaming_performance(
+        algorithms=algorithms,
+        transactions=transactions,
+        labels=labels,
+        window_size=window_size,
+        anomaly_threshold=config['anomaly_threshold'],
+        pattern_refresh_interval=config.get('pattern_refresh_interval', 1)
     )
     # Save performance metrics to CSV
     results_df = pd.DataFrame.from_dict(results, orient='index')
